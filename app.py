@@ -452,15 +452,15 @@ if st.session_state.raw_df is not None:
         f"{avg_margin:.2f}%" if pd.notna(avg_margin) else "—",
     )
 
-    for fname in files:
-        file_rows = raw_df[raw_df["_source_file"] == fname]
-        margin_val = margins.get(fname)
-        margin_display = f"{margin_val:.2f}%" if pd.notna(margin_val) else "not found"
+    summary_df = raw_df.groupby("_source_file").agg(
+        line_items=("sku", "count"),
+        requested_margin=("requested_margin", "first"),
+    ).reset_index().rename(columns={"_source_file": "file"})
+    summary_df["requested_margin"] = summary_df["requested_margin"].apply(
+        lambda v: f"{v:.2f}%" if pd.notna(v) else "not found"
+    )
 
-        with st.expander(f"{fname} — {len(file_rows)} line item(s), margin: {margin_display}", expanded=True):
-            st.metric("Requested margin", margin_display)
-            display_cols = ["sku", "list_price", "multiplier", "contract_price"]
-            st.dataframe(file_rows[display_cols], use_container_width=True, hide_index=True)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 if st.session_state.result_df is not None:
     full_df = st.session_state.result_df
