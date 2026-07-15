@@ -83,6 +83,32 @@ def find_supplier_pdf(attachments):
     return pdf_atts[0] if pdf_atts else None
 
 
+def find_request_form_pdf(attachments):
+    """Pick the PriceSheetCreation.pdf request-form attachment specifically."""
+    pdf_atts = [
+        a for a in attachments
+        if (a.longFilename or a.shortFilename or "").lower().endswith(".pdf")
+    ]
+    for a in pdf_atts:
+        fname = (a.longFilename or a.shortFilename or "").lower()
+        if any(hint in fname for hint in REQUEST_FORM_NAME_HINTS):
+            return a
+    return None
+
+
+def extract_requested_margin(pdf_bytes):
+    """Pulls the 'Requested Margin * NN.NNNN %' value from the request form PDF."""
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    match = re.search(r"Requested Margin\s*\*?\s*\n?\s*([\d.]+)\s*%", text)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 def extract_line_items_from_pdf(pdf_bytes):
     """
     Scan every table on every page for a header row containing
@@ -145,6 +171,16 @@ def process_msg_file(file_bytes, filename):
 
         if not rows:
             return [], f"{filename}: no line items found in supplier PDF"
+
+        # Pull Requested Margin from the request-form PDF and stamp it onto
+        # every line item row from this .msg
+        requested_margin = None
+        form_pdf_att = find_request_form_pdf(msg.attachments)
+        if form_pdf_att is not None:
+            requested_margin = extract_requested_margin(form_pdf_att.data)
+
+        for r in rows:
+            r["requested_margin"] = requested_margin
 
         return rows, None
     except Exception as e:
