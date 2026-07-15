@@ -223,6 +223,7 @@ def process_msg_file(file_bytes, filename, supplier):
         for r in rows:
             r["requested_margin"] = requested_margin
             r["manufacturer"] = supplier
+            r["_source_file"] = filename
 
         return rows, None
     except Exception as e:
@@ -247,6 +248,8 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 if "result_df" not in st.session_state:
     st.session_state.result_df = None
+if "raw_df" not in st.session_state:
+    st.session_state.raw_df = None
 if "errors" not in st.session_state:
     st.session_state.errors = []
 
@@ -279,6 +282,7 @@ with col2:
 if clear_clicked:
     st.session_state.uploader_key += 1
     st.session_state.result_df = None
+    st.session_state.raw_df = None
     st.session_state.errors = []
     st.rerun()
 
@@ -301,9 +305,11 @@ if process_clicked and uploaded_files:
     st.session_state.errors = errors
     if all_rows:
         df = pd.DataFrame(all_rows)
+        st.session_state.raw_df = df
         # Reindex into full 41-column schema, blank elsewhere
         st.session_state.result_df = df.reindex(columns=OUTPUT_COLUMNS)
     else:
+        st.session_state.raw_df = None
         st.session_state.result_df = None
 
 if st.session_state.errors:
@@ -311,8 +317,41 @@ if st.session_state.errors:
     for e in st.session_state.errors:
         st.text(f"⚠ {e}")
 
+if st.session_state.raw_df is not None:
+    raw_df = st.session_state.raw_df
+
+    st.divider()
+    st.subheader("Dashboard: line items & margin from PDFs")
+
+    files = raw_df["_source_file"].unique().tolist()
+    margins = raw_df.groupby("_source_file")["requested_margin"].first()
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Files processed", len(files))
+    m2.metric("Total line items", len(raw_df))
+    avg_margin = margins.dropna().mean()
+    m3.metric(
+        "Avg requested margin",
+        f"{avg_margin:.2f}%" if pd.notna(avg_margin) else "—",
+    )
+
+    for fname in files:
+        file_rows = raw_df[raw_df["_source_file"] == fname]
+        margin_val = margins.get(fname)
+        margin_display = f"{margin_val:.2f}%" if pd.notna(margin_val) else "not found"
+
+        with st.expander(f"{fname} — {len(file_rows)} line item(s), margin: {margin_display}", expanded=True):
+            st.metric("Requested margin", margin_display)
+            display_cols = ["sku", "list_price", "multiplier", "contract_price"]
+            st.dataframe(file_rows[display_cols], use_container_width=True, hide_index=True)
+
+            chart_df = file_rows.set_index("sku")[["list_price", "contract_price"]]
+            st.bar_chart(chart_df)
+
 if st.session_state.result_df is not None:
     full_df = st.session_state.result_df
+    st.divider()
+    st.subheader("Export")
     st.success(f"Extracted {len(full_df)} line item row(s).")
     st.dataframe(full_df, use_container_width=True)
 
