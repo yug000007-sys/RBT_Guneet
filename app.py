@@ -197,55 +197,85 @@ st.title("Heitek SPA/Rebate Line Item Extractor")
 st.caption(
     "Upload .msg files. The app pulls the supplier SPA/Rebate PDF from each, "
     "extracts the line-item table, and maps Model Number → sku, List Price → "
-    "list_price, Dist Multi → multiplier, Dist Net → contract_price."
+    "list_price, Dist Multi → multiplier, Dist Net → contract_price, plus "
+    "Requested Margin → requested_margin from the request form."
 )
+
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+if "result_df" not in st.session_state:
+    st.session_state.result_df = None
+if "errors" not in st.session_state:
+    st.session_state.errors = []
 
 uploaded_files = st.file_uploader(
-    "Upload .msg files", type=["msg"], accept_multiple_files=True
+    "Upload .msg files",
+    type=["msg"],
+    accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}",
 )
 
-if uploaded_files:
-    if st.button(f"Process {len(uploaded_files)} file(s)", type="primary"):
-        all_rows = []
-        errors = []
-        progress = st.progress(0, text="Starting...")
+col1, col2 = st.columns([1, 1])
+with col1:
+    process_clicked = st.button(
+        f"Process {len(uploaded_files)} file(s)" if uploaded_files else "Process",
+        type="primary",
+        disabled=not uploaded_files,
+    )
+with col2:
+    clear_clicked = st.button("Clear")
 
-        for i, f in enumerate(uploaded_files):
-            progress.progress(
-                (i) / len(uploaded_files), text=f"Processing {f.name}..."
-            )
-            rows, err = process_msg_file(f.read(), f.name)
-            all_rows.extend(rows)
-            if err:
-                errors.append(err)
+if clear_clicked:
+    st.session_state.uploader_key += 1
+    st.session_state.result_df = None
+    st.session_state.errors = []
+    st.rerun()
 
-        progress.progress(1.0, text="Done")
+if process_clicked and uploaded_files:
+    all_rows = []
+    errors = []
+    progress = st.progress(0, text="Starting...")
 
-        if errors:
-            st.warning("Some files had issues:")
-            for e in errors:
-                st.text(f"⚠ {e}")
+    for i, f in enumerate(uploaded_files):
+        progress.progress(
+            (i) / len(uploaded_files), text=f"Processing {f.name}..."
+        )
+        rows, err = process_msg_file(f.read(), f.name)
+        all_rows.extend(rows)
+        if err:
+            errors.append(err)
 
-        if all_rows:
-            df = pd.DataFrame(all_rows)
-            # Reindex into full 41-column schema, blank elsewhere
-            full_df = df.reindex(columns=OUTPUT_COLUMNS)
+    progress.progress(1.0, text="Done")
 
-            st.success(f"Extracted {len(full_df)} line item row(s).")
-            st.dataframe(full_df, use_container_width=True)
+    st.session_state.errors = errors
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        # Reindex into full 41-column schema, blank elsewhere
+        st.session_state.result_df = df.reindex(columns=OUTPUT_COLUMNS)
+    else:
+        st.session_state.result_df = None
 
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                full_df.to_excel(writer, index=False, sheet_name="Line Items")
-            buf.seek(0)
+if st.session_state.errors:
+    st.warning("Some files had issues:")
+    for e in st.session_state.errors:
+        st.text(f"⚠ {e}")
 
-            st.download_button(
-                "Download Excel",
-                data=buf,
-                file_name="spa_line_items.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        else:
-            st.error("No line items were extracted from any file.")
-else:
+if st.session_state.result_df is not None:
+    full_df = st.session_state.result_df
+    st.success(f"Extracted {len(full_df)} line item row(s).")
+    st.dataframe(full_df, use_container_width=True)
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        full_df.to_excel(writer, index=False, sheet_name="Line Items")
+    buf.seek(0)
+
+    st.download_button(
+        "Download Excel",
+        data=buf,
+        file_name="spa_line_items.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+elif not uploaded_files:
     st.info("Upload one or more .msg files to begin.")
+
