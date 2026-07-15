@@ -42,6 +42,18 @@ streamlit run app.py
    Cloud silently ignores it.
 4. Deploy.
 
+## Adding a new supplier
+
+The app currently has a parser for **Banner Engineering Corporation** only.
+The dropdown lists all 16 suppliers, but any supplier without a configured
+parser will show a "not yet configured" message and its files will come
+back as errors.
+
+To add a supplier:
+1. Send a sample `.msg` file for that supplier (with its SPA/rebate PDF).
+2. A new parser function gets added to `app.py` (following the pattern of
+   `extract_line_items_banner`) and registered in `SUPPLIER_PARSERS`.
+
 ## Notes / assumptions
 
 - Only 4 fields are populated per your instructions (`sku`, `list_price`,

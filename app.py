@@ -42,6 +42,28 @@ OUTPUT_COLUMNS = [
 
 REQUEST_FORM_NAME_HINTS = ("pricesheetcreation",)
 
+# ---------------------------------------------------------------------------
+# Supplier list for the dropdown
+# ---------------------------------------------------------------------------
+SUPPLIERS = [
+    "8020 INC",
+    "Abb Motors And Mechanical Inc",
+    "Banner Engineering Corporation",
+    "Fabco-Air Inc",
+    "Festo Corporation",
+    "Leuze Electronic Inc",
+    "Murr Elektronik",
+    "PHOENIX CONTACT",
+    "RITTAL NORTH AMERICA LLC",
+    "Robroy Industries Inc",
+    "Schmersal",
+    "Siemens Industry Inc",
+    "Tolomatic",
+    "Turck Inc",
+    "WEIDMULLER",
+    "Yeager Machine Inc",
+]
+
 
 def money_to_float(val):
     """'$30.00' -> 30.0 ; '' or None -> None"""
@@ -109,12 +131,13 @@ def extract_requested_margin(pdf_bytes):
     return None
 
 
-def extract_line_items_from_pdf(pdf_bytes):
+def extract_line_items_banner(pdf_bytes):
     """
-    Scan every table on every page for a header row containing
-    'Model Number' and 'List Price', then pull data rows beneath it.
+    Parser for Banner Engineering Corporation SPA/Rebate PDFs.
+    Scans every table on every page for a header row containing
+    'Model Number' and 'List Price', then pulls data rows beneath it.
     Column positions are fixed relative to the header (Part#, Model#,
-    List Price, Dist Multi, Dist Net, ...) based on the supplier template.
+    List Price, Dist Multi, Dist Net, ...) based on Banner's template.
     """
     rows = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -153,8 +176,26 @@ def extract_line_items_from_pdf(pdf_bytes):
     return rows
 
 
-def process_msg_file(file_bytes, filename):
+# ---------------------------------------------------------------------------
+# Supplier -> parser registry.
+# Add an entry here once a supplier's PDF layout has been mapped. Suppliers
+# not yet in this dict will show a "not yet configured" message in the UI —
+# send a sample .msg for that supplier to add support.
+# ---------------------------------------------------------------------------
+SUPPLIER_PARSERS = {
+    "Banner Engineering Corporation": extract_line_items_banner,
+}
+
+
+def process_msg_file(file_bytes, filename, supplier):
     """Returns a list of dict rows extracted from one .msg file."""
+    parser = SUPPLIER_PARSERS.get(supplier)
+    if parser is None:
+        return [], (
+            f"{filename}: no parser configured yet for '{supplier}' — "
+            f"send a sample .msg for this supplier to add support"
+        )
+
     with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
@@ -167,7 +208,7 @@ def process_msg_file(file_bytes, filename):
             return [], f"{filename}: no supplier PDF attachment found"
 
         pdf_bytes = supplier_pdf_att.data
-        rows = extract_line_items_from_pdf(pdf_bytes)
+        rows = parser(pdf_bytes)
 
         if not rows:
             return [], f"{filename}: no line items found in supplier PDF"
@@ -181,6 +222,7 @@ def process_msg_file(file_bytes, filename):
 
         for r in rows:
             r["requested_margin"] = requested_margin
+            r["manufacturer"] = supplier
 
         return rows, None
     except Exception as e:
@@ -195,10 +237,10 @@ def process_msg_file(file_bytes, filename):
 st.set_page_config(page_title="SPA Line Item Extractor", layout="wide")
 st.title("Heitek SPA/Rebate Line Item Extractor")
 st.caption(
-    "Upload .msg files. The app pulls the supplier SPA/Rebate PDF from each, "
-    "extracts the line-item table, and maps Model Number → sku, List Price → "
-    "list_price, Dist Multi → multiplier, Dist Net → contract_price, plus "
-    "Requested Margin → requested_margin from the request form."
+    "Select a supplier, upload .msg files, and the app pulls the supplier "
+    "SPA/Rebate PDF from each, extracts the line-item table, and maps it "
+    "into the 41-column schema (sku, list_price, multiplier, contract_price, "
+    "requested_margin, manufacturer)."
 )
 
 if "uploader_key" not in st.session_state:
@@ -207,6 +249,15 @@ if "result_df" not in st.session_state:
     st.session_state.result_df = None
 if "errors" not in st.session_state:
     st.session_state.errors = []
+
+supplier = st.selectbox("Supplier", SUPPLIERS)
+
+if supplier not in SUPPLIER_PARSERS:
+    st.info(
+        f"No parser configured yet for **{supplier}**. Upload will still "
+        f"work, but files will come back as errors until a sample PDF for "
+        f"this supplier is used to add support."
+    )
 
 uploaded_files = st.file_uploader(
     "Upload .msg files",
@@ -240,7 +291,7 @@ if process_clicked and uploaded_files:
         progress.progress(
             (i) / len(uploaded_files), text=f"Processing {f.name}..."
         )
-        rows, err = process_msg_file(f.read(), f.name)
+        rows, err = process_msg_file(f.read(), f.name, supplier)
         all_rows.extend(rows)
         if err:
             errors.append(err)
