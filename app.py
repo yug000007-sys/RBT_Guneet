@@ -235,14 +235,125 @@ def process_msg_file(file_bytes, filename, supplier):
 # ---------------------------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="SPA Line Item Extractor", layout="wide")
-st.title("Heitek SPA/Rebate Line Item Extractor")
-st.caption(
-    "Select a supplier, upload .msg files, and the app pulls the supplier "
-    "SPA/Rebate PDF from each, extracts the line-item table, and maps it "
-    "into the 41-column schema (sku, list_price, multiplier, contract_price, "
-    "requested_margin, manufacturer)."
+st.set_page_config(
+    page_title="SPA Line Item Extractor",
+    page_icon="📋",
+    layout="wide",
 )
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
+
+/* App background */
+.stApp { background-color: #F4F6F9; }
+
+/* Hide default Streamlit chrome we don't need */
+#MainMenu, footer { visibility: hidden; }
+
+/* Header banner */
+.app-header {
+    background: linear-gradient(135deg, #0B1F3A 0%, #14335E 100%);
+    padding: 28px 36px;
+    border-radius: 14px;
+    margin-bottom: 28px;
+    box-shadow: 0 4px 18px rgba(11,31,58,0.18);
+}
+.app-header h1 {
+    color: #FFFFFF;
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 6px 0;
+}
+.app-header p {
+    color: #A9BBD6;
+    font-size: 14px;
+    margin: 0;
+}
+.app-header .schema-tag {
+    display: inline-block;
+    margin-top: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #7CD4C6;
+    background: rgba(124,212,198,0.12);
+    border: 1px solid rgba(124,212,198,0.35);
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+/* Card container for controls */
+.control-card {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+}
+
+/* Section divider labels */
+.section-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #1D4ED8;
+    border-left: 3px solid #1D4ED8;
+    padding-left: 10px;
+    margin: 6px 0 14px 0;
+}
+
+/* Metrics styling */
+div[data-testid="stMetric"] {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-left: 4px solid #0EA5A0;
+    border-radius: 10px;
+    padding: 14px 18px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+}
+
+/* Buttons */
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid #E2E8F0;
+}
+.stButton > button[kind="primary"] {
+    background-color: #1D4ED8;
+    border: none;
+}
+.stButton > button[kind="primary"]:hover {
+    background-color: #1640B0;
+}
+
+/* Expander (per-file dashboard cards) */
+div[data-testid="stExpander"] {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+    margin-bottom: 10px;
+}
+
+/* Dataframe corners */
+div[data-testid="stDataFrame"] {
+    border-radius: 8px;
+    overflow: hidden;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="app-header">
+    <h1>📋 Heitek SPA / Rebate Line Item Extractor</h1>
+    <p>Select a supplier, upload .msg files, and extract line items + requested margin straight from the PDFs.</p>
+    <span class="schema-tag">sku · list_price · multiplier · contract_price · requested_margin · manufacturer</span>
+</div>
+""", unsafe_allow_html=True)
 
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
@@ -253,7 +364,9 @@ if "raw_df" not in st.session_state:
 if "errors" not in st.session_state:
     st.session_state.errors = []
 
-supplier = st.selectbox("Supplier", SUPPLIERS)
+st.markdown('<div class="control-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-label">1 · Choose supplier</div>', unsafe_allow_html=True)
+supplier = st.selectbox("Supplier", SUPPLIERS, label_visibility="collapsed")
 
 if supplier not in SUPPLIER_PARSERS:
     st.info(
@@ -262,11 +375,13 @@ if supplier not in SUPPLIER_PARSERS:
         f"this supplier is used to add support."
     )
 
+st.markdown('<div class="section-label" style="margin-top:18px;">2 · Upload .msg files</div>', unsafe_allow_html=True)
 uploaded_files = st.file_uploader(
     "Upload .msg files",
     type=["msg"],
     accept_multiple_files=True,
     key=f"uploader_{st.session_state.uploader_key}",
+    label_visibility="collapsed",
 )
 
 col1, col2 = st.columns([1, 1])
@@ -275,9 +390,12 @@ with col1:
         f"Process {len(uploaded_files)} file(s)" if uploaded_files else "Process",
         type="primary",
         disabled=not uploaded_files,
+        use_container_width=True,
     )
 with col2:
-    clear_clicked = st.button("Clear")
+    clear_clicked = st.button("Clear", use_container_width=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 if clear_clicked:
     st.session_state.uploader_key += 1
@@ -320,8 +438,7 @@ if st.session_state.errors:
 if st.session_state.raw_df is not None:
     raw_df = st.session_state.raw_df
 
-    st.divider()
-    st.subheader("Dashboard: line items & margin from PDFs")
+    st.markdown('<div class="section-label" style="margin-top:6px;">Dashboard · line items & margin from PDFs</div>', unsafe_allow_html=True)
 
     files = raw_df["_source_file"].unique().tolist()
     margins = raw_df.groupby("_source_file")["requested_margin"].first()
@@ -345,13 +462,9 @@ if st.session_state.raw_df is not None:
             display_cols = ["sku", "list_price", "multiplier", "contract_price"]
             st.dataframe(file_rows[display_cols], use_container_width=True, hide_index=True)
 
-            chart_df = file_rows.set_index("sku")[["list_price", "contract_price"]]
-            st.bar_chart(chart_df)
-
 if st.session_state.result_df is not None:
     full_df = st.session_state.result_df
-    st.divider()
-    st.subheader("Export")
+    st.markdown('<div class="section-label" style="margin-top:24px;">Export · full 41-column schema</div>', unsafe_allow_html=True)
     st.success(f"Extracted {len(full_df)} line item row(s).")
     st.dataframe(full_df, use_container_width=True)
 
