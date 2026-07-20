@@ -131,6 +131,43 @@ def extract_requested_margin(pdf_bytes):
     return None
 
 
+def _field_after_label(text, label):
+    """Grabs the single line of text immediately following a form field label."""
+    match = re.search(re.escape(label) + r"\s*\*?\s*\n([^\n]+)", text)
+    return match.group(1).strip() if match else None
+
+
+def _parse_form_date(raw):
+    """Converts 'dd-MMM-yyyy' (e.g. '13-Jul-2026') into a date object."""
+    if not raw:
+        return None
+    try:
+        return pd.to_datetime(raw, format="%d-%b-%Y").date()
+    except ValueError:
+        return None
+
+
+def extract_header_fields(pdf_bytes):
+    """
+    Pulls contract-level fields from the PriceSheetCreation.pdf request form:
+        SPA / Rebate Number -> contract_id
+        Effective Date      -> contract_start
+        Expiration Date     -> contract_end
+        Customer ID         -> customer_number
+        Customer Name       -> customer_name
+    """
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+    return {
+        "contract_id": _field_after_label(text, "SPA / Rebate Number"),
+        "contract_start": _parse_form_date(_field_after_label(text, "Effective Date")),
+        "contract_end": _parse_form_date(_field_after_label(text, "Expiration Date")),
+        "customer_number": _field_after_label(text, "Customer ID"),
+        "customer_name": _field_after_label(text, "Customer Name"),
+    }
+
+
 def extract_line_items_banner(pdf_bytes):
     """
     Parser for Banner Engineering Corporation SPA/Rebate PDFs.
@@ -213,17 +250,20 @@ def process_msg_file(file_bytes, filename, supplier):
         if not rows:
             return [], f"{filename}: no line items found in supplier PDF"
 
-        # Pull Requested Margin from the request-form PDF and stamp it onto
-        # every line item row from this .msg
+        # Pull header-level fields from the request-form PDF and stamp them
+        # onto every line item row from this .msg
         requested_margin = None
+        header_fields = {}
         form_pdf_att = find_request_form_pdf(msg.attachments)
         if form_pdf_att is not None:
             requested_margin = extract_requested_margin(form_pdf_att.data)
+            header_fields = extract_header_fields(form_pdf_att.data)
 
         for r in rows:
             r["requested_margin"] = requested_margin
             r["manufacturer"] = supplier
             r["_source_file"] = filename
+            r.update(header_fields)
 
         return rows, None
     except Exception as e:
